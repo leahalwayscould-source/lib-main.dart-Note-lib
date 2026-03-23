@@ -1,0 +1,52 @@
+name: artist_community
+description: A community app for artists to share, critique, and monetize their work.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase & Authentication
+  firebase_core: ^4.5.0
+  firebase_auth: ^6.2.0
+  cloud_firestore: ^6.1.3
+  cloud_functions: ^6.0.1
+  firebase_storage: ^13.1.0
+  
+  # State Management
+  provider: ^6.0.0
+  
+  # Image & File Handling
+  image_picker: ^1.0.0
+  cached_network_image: ^3.3.0
+  
+  # UI & Navigation
+  google_nav_bar: ^5.0.6
+  shimmer: ^3.0.0
+  smooth_page_indicator: ^2.0.1
+  
+  # Utilities
+  intl: ^0.20.2
+  uuid: ^4.0.0
+  shared_preferences: ^2.2.0
+  url_launcher: ^6.3.1
+  
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/

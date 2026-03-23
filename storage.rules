@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Art uploads - users can upload and read their own, all can read public
+    match /art_uploads/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth.uid == userId;
+      allow create: if request.auth.uid == userId 
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.size < 50 * 1024 * 1024; // 50 MB max
+    }
+
+    // User profile images
+    match /profile_images/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth.uid == userId;
+      allow create: if request.auth.uid == userId 
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.size < 10 * 1024 * 1024; // 10 MB max
+    }
+
+    // Deny everything else by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

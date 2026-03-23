@@ -1,0 +1,255 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isParticipant(data) {
+      return isSignedIn() && request.auth.uid in [data.buyerUid, data.artistUid];
+    }
+
+    function hasRequiredInquiryFields(data) {
+      return data.keys().hasAll([
+        'conversationId',
+        'postId',
+        'postTitle',
+        'postImageUrl',
+        'artistUid',
+        'artistName',
+        'buyerUid',
+        'buyerName',
+        'buyerEmail',
+        'intent',
+        'message',
+        'status',
+        'statusHistory',
+        'createdAt',
+        'updatedAt',
+      ]);
+    }
+
+    function hasRequiredConversationFields(data) {
+      return data.keys().hasAll([
+        'inquiryId',
+        'postId',
+        'postTitle',
+        'postImageUrl',
+        'artistUid',
+        'artistName',
+        'buyerUid',
+        'buyerName',
+        'buyerEmail',
+        'intent',
+        'latestMessage',
+        'latestSenderUid',
+        'participantUids',
+        'status',
+        'createdAt',
+        'lastMessageAt',
+        'lastReadAtBy',
+        'unreadCountBy',
+      ]);
+    }
+
+    function inquiryCoreFieldsUnchanged() {
+      return request.resource.data.conversationId == resource.data.conversationId &&
+        request.resource.data.postId == resource.data.postId &&
+        request.resource.data.postTitle == resource.data.postTitle &&
+        request.resource.data.postImageUrl == resource.data.postImageUrl &&
+        request.resource.data.artistUid == resource.data.artistUid &&
+        request.resource.data.artistName == resource.data.artistName &&
+        request.resource.data.buyerUid == resource.data.buyerUid &&
+        request.resource.data.buyerName == resource.data.buyerName &&
+        request.resource.data.buyerEmail == resource.data.buyerEmail &&
+        request.resource.data.intent == resource.data.intent &&
+        request.resource.data.message == resource.data.message &&
+        request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function conversationCoreFieldsUnchanged() {
+      return request.resource.data.inquiryId == resource.data.inquiryId &&
+        request.resource.data.postId == resource.data.postId &&
+        request.resource.data.postTitle == resource.data.postTitle &&
+        request.resource.data.postImageUrl == resource.data.postImageUrl &&
+        request.resource.data.artistUid == resource.data.artistUid &&
+        request.resource.data.artistName == resource.data.artistName &&
+        request.resource.data.buyerUid == resource.data.buyerUid &&
+        request.resource.data.buyerName == resource.data.buyerName &&
+        request.resource.data.buyerEmail == resource.data.buyerEmail &&
+        request.resource.data.intent == resource.data.intent &&
+        request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function validStatus(status) {
+      return status in ['open', 'reviewing', 'quoted', 'accepted', 'closed'];
+    }
+    
+    // Allow users to manage their own subscriptions.
+    // Create: owner only. Update: owner can only deactivate via cancel/upgrade handoff.
+    match /subscriptions/{subscriptionId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        request.auth.uid == resource.data.userId &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isActive',
+          'endDate',
+          'updatedAt',
+        ]) &&
+        request.resource.data.isActive == false;
+
+      allow delete: if false;
+    }
+    
+    // Allow users to read/write their own user documents
+    match /users/{userId} {
+      allow read: if request.auth.uid == userId;
+      allow write: if request.auth.uid == userId;
+
+      // Onboarding events are per-user append-only telemetry.
+      match /onboardingEvents/{eventId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId;
+        allow update, delete: if false;
+      }
+    }
+    
+    // Allow users to read upload history for their own uploads
+    match /uploadHistory/{document=**} {
+      allow read: if request.auth.uid == resource.data.userId;
+      allow create: if request.auth.uid != null;
+      allow update, delete: if false;
+    }
+    
+    // Allow public read of art posts, but only owner can modify
+    match /artPosts/{document=**} {
+      allow read: if true;
+      allow create: if request.auth.uid == request.resource.data.artistUid;
+      allow update, delete: if request.auth.uid == resource.data.artistUid;
+    }
+    
+    // Allow users to read critiques and create their own
+    match /critiques/{document=**} {
+      allow read: if true;
+      allow create: if request.auth.uid == request.resource.data.critiquerUid;
+      allow update: if request.auth.uid == resource.data.critiquerUid;
+      allow delete: if request.auth.uid == resource.data.critiquerUid;
+    }
+
+    // Print orders are written by Cloud Functions only; users can read only their own.
+    match /printOrders/{orderId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create, update, delete: if false;
+
+      // Order timeline/events are backend-written only and visible to order owner.
+      match /events/{eventId} {
+        allow read: if request.auth != null &&
+          request.auth.uid == get(/databases/$(database)/documents/printOrders/$(orderId)).data.userId;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Artwork order records are buyer-owned from client checkout flows.
+    // Backend can still augment these records through privileged contexts.
+    match /artworkOrders/{orderId} {
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    // Artwork inquiries can be managed by the collector and the related artist.
+    match /artworkInquiries/{inquiryId} {
+      allow create: if isSignedIn() &&
+        request.auth.uid == request.resource.data.buyerUid &&
+        hasRequiredInquiryFields(request.resource.data) &&
+        validStatus(request.resource.data.status);
+
+      allow read: if isParticipant(resource.data);
+
+      allow update: if isParticipant(resource.data) &&
+        inquiryCoreFieldsUnchanged() &&
+        validStatus(request.resource.data.status) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'statusHistory',
+          'updatedAt',
+        ]);
+
+      allow delete: if false;
+    }
+
+    // Conversation thread metadata and message stream for collector <> artist inquiry chats.
+    match /collectorConversations/{conversationId} {
+      allow create: if isSignedIn() &&
+        request.auth.uid == request.resource.data.buyerUid &&
+        hasRequiredConversationFields(request.resource.data) &&
+        request.resource.data.participantUids.hasAll([
+          request.resource.data.buyerUid,
+          request.resource.data.artistUid,
+        ]) &&
+        validStatus(request.resource.data.status);
+
+      allow read: if isParticipant(resource.data);
+
+      allow update: if isParticipant(resource.data) &&
+        conversationCoreFieldsUnchanged() &&
+        request.resource.data.participantUids == resource.data.participantUids &&
+        validStatus(request.resource.data.status) &&
+        request.resource.data.latestSenderUid in [resource.data.buyerUid, resource.data.artistUid] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'latestMessage',
+          'latestSenderUid',
+          'lastMessageAt',
+          'lastReadAtBy',
+          'unreadCountBy',
+          'updatedAt',
+        ]);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow create: if isSignedIn() &&
+          request.auth.uid in [
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.buyerUid,
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.artistUid,
+          ] &&
+          request.resource.data.senderUid == request.auth.uid &&
+          request.resource.data.senderUid in [
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.buyerUid,
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.artistUid,
+          ] &&
+          request.resource.data.keys().hasAll([
+            'senderUid',
+            'senderName',
+            'senderEmail',
+            'text',
+            'type',
+            'createdAt',
+          ]) &&
+          request.resource.data.type in ['inquiry', 'message', 'status'];
+
+        allow read: if isSignedIn() &&
+          request.auth.uid in [
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.buyerUid,
+            get(/databases/$(database)/documents/collectorConversations/$(conversationId)).data.artistUid,
+          ];
+
+        allow update, delete: if false;
+      }
+    }
+    
+    // Deny everything else by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
